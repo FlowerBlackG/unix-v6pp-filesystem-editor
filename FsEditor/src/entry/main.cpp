@@ -8,6 +8,9 @@
 #include <string>
 #include <fstream>
 #include <filesystem>
+#include "../include/MacroDefines.h"
+#include "../include/structures/Inode.h"
+#include "../include/FileSystemAdapter.h"
 
 using namespace std;
 using namespace std::filesystem;
@@ -40,6 +43,9 @@ void usage(const char* hint = nullptr) {
     cout << "> m [dir name]: make directory." << endl;
     cout << "> k [file path]: write kernel file." << endl;
     cout << "> b [file path]: write bootloader file." << endl;
+    cout << endl;
+    cout << "all path should be surrounded by a pair of '|'" << endl;
+    cout << "example: > b |C://Program Files/soft/soft.exe|" << endl;
 }
 
 int prepareImgFile(
@@ -91,6 +97,10 @@ int prepareImgFile(
  * 程序进入点。 
  */
 int main(int argc, const char* argv[]) {
+    FileSystemAdapter fsa("E:\\code-repo\\unix-v6pp-filesystem-editor\\output\\c.img");
+    fsa.load();
+
+    int x = 2;
     if (argc < 3) {
         usage("too few arguments.");
         return -1;

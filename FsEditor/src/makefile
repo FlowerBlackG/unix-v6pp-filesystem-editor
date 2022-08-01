@@ -8,14 +8,22 @@ include ../../makefile.inc
 OUTPUT_PATH = ..\..\output
 OBJ_PATH = ..\objs
 
-OBJS = $(OBJ_PATH)/entry/main.o \
-		$(OBJ_PATH)/MockFileSystem/MockFileSystem.o
+OBJS = $(OBJ_PATH)\entry\main.o \
+		$(OBJ_PATH)\FileSystemAdapter\FileSystemAdapter.o \
+		$(OBJ_PATH)\structures\Inode.o \
+		$(OBJ_PATH)\structures\SuperBlock.o \
+		$(OBJ_PATH)\structures\InodeDirectory.o
 
-DIRS = entry MockFileSystem
+
+DIRS = entry FileSystemAdapter structures
 .PHONY: $(DIRS)
 $(DIRS):
 	$(MAKE) --directory=$@
 
 .PHONY: all
 all: $(DIRS)
-	$(CC) -o $(OUTPUT_PATH)/fsedit.exe $(OBJS)	
+	$(CC) $(CFLAGS) -o $(OUTPUT_PATH)/fsedit.exe $(OBJS)	
+
+.PHONY: clean
+clean: $(OBJS)
+	del $^
