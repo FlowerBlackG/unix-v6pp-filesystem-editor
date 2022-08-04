@@ -37,9 +37,10 @@ public:
         }
     }
 
-    InodeDirectory(const DiskInode& inode, FileSystemAdapter& f);
+    InodeDirectory(const Inode& inode, class FileSystemAdapter& f, bool ignoreFileTypeCheck = false);
 
 public:
+    int length = 0;
     DirectoryEntry* entries = nullptr;
 
 } __packed;

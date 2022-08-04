@@ -10,21 +10,11 @@
 #include <fstream>
 #include "../MacroDefines.h"
 
-class SysDiskInode {
-    unsigned int d_mode;
-    int d_nlink;
-    short d_uid;
-    short d_gid;
-    int d_size;
-    int d_addr[10];
-    int d_atime;
-    int d_mtime;
-};
 
 /**
  * 硬盘 Inode 结构。
  */
-class DiskInode {
+class Inode {
 public:
     enum FileType {
         NORMAL = 0,
@@ -35,7 +25,7 @@ public:
 
 public:
     /* ------------ uint32_t d_mode : 32 ------------ */
-    uint16_t permission : 3;
+    uint16_t permission_others : 3;
     uint16_t permission_group : 3;
     uint16_t permission_owner : 3;
     
@@ -72,7 +62,7 @@ public:
     uint32_t d_mtime;
 
 public:
-    DiskInode() {
+    Inode() {
         // nothing to do.
     }
 
@@ -83,7 +73,7 @@ public:
      * @param f 文件流。必须可读且空间足够。
      * @param blockOffset 盘块偏移。
      */
-    DiskInode(std::fstream& f, const int blockOffset) {
+    Inode(std::fstream& f, const int blockOffset) {
         this->loadFromImg(f, blockOffset);
     }
 
@@ -119,9 +109,8 @@ public:
     bool writeToImg(std::fstream& f, const int blockOffset);
 } __packed;
 
-#if 1
+#if 0
 static void __check_size() {
-    sizeof(DiskInode); // 64 字节。
-    sizeof(SysDiskInode);
+    sizeof(Inode); // 64 字节。
 }
 #endif

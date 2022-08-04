@@ -7,10 +7,11 @@
 #pragma once
 
 #include <cstdint>
+#include "../MachineProps.h"
 
 class Block {
 public:
-    uint8_t bytes[512];
+    uint8_t bytes[MachineProps::BLOCK_SIZE];
 
 public:
     inline char* asCharArray() {

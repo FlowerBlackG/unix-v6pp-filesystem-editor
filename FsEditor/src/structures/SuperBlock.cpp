@@ -16,7 +16,7 @@ bool SuperBlock::writeToImg(fstream& f, const int blockOffset) {
         ios::beg
     );
     f.write(this->asCharArray(), sizeof(SuperBlock));
-    return f.tellp() == sizeof(SuperBlock);
+    return true;
 }
 
 bool SuperBlock::loadFromImg(fstream& f, const int blockOffset) {
@@ -26,5 +26,5 @@ bool SuperBlock::loadFromImg(fstream& f, const int blockOffset) {
         ios::beg
     );
     f.read(this->asCharArray(), sizeof(SuperBlock));
-    return f.tellg() == sizeof(SuperBlock);
+    return f.gcount() == sizeof(SuperBlock);
 }

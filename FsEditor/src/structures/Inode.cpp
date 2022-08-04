@@ -9,23 +9,23 @@
 #include <fstream>
 using namespace std;
 
-bool DiskInode::loadFromImg(fstream& f, const int blockOffset) {
+bool Inode::loadFromImg(fstream& f, const int blockOffset) {
     f.clear();
     f.seekg(
         MachineProps::BLOCK_SIZE * blockOffset, 
         ios::beg
     );
-    f.read(this->asCharArray(), sizeof(DiskInode));
-    return f.tellg() == sizeof(DiskInode);
+    f.read(this->asCharArray(), sizeof(Inode));
+    return f.gcount() == sizeof(Inode);
 }
 
-bool DiskInode::writeToImg(fstream& f, const int blockOffset) {
+bool Inode::writeToImg(fstream& f, const int blockOffset) {
     f.clear();
     f.seekp(
         MachineProps::BLOCK_SIZE * blockOffset, 
         ios::beg
     );
-    f.write(this->asCharArray(), sizeof(DiskInode));
-    return f.tellp() == sizeof(DiskInode);
+    f.write(this->asCharArray(), sizeof(Inode));
+    return true;
 }
 
