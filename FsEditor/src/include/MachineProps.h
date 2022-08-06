@@ -46,7 +46,11 @@ public:
 
     /** 推荐的硬盘大小。 */
     static inline unsigned long long diskSize() {
-        return 1ULL * CYLINDERS * SECTORS_PER_TRACK * HEADS * BLOCK_SIZE;
+        return diskBlocks() * BLOCK_SIZE;
+    }
+
+    static inline unsigned long long diskBlocks() {
+        return 1ULL * CYLINDERS * SECTORS_PER_TRACK * HEADS;
     }
 
 private:

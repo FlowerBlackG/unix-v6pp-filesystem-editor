@@ -12,6 +12,7 @@
 #include <cmath>
 #include <cstring>
 #include <cstdint>
+#include <chrono>
 #include "../include/FileSystemAdapter.h"
 #include "../include/MachineProps.h"
 #include "../include/structures/Inode.h"
@@ -20,6 +21,15 @@
 #include "../include/structures/InodeDirectory.h"
 
 using namespace std;
+using namespace std::chrono;
+
+static int getCurrentTimeStamp() {
+    auto now = system_clock::now();
+    nanoseconds nanosec = now.time_since_epoch();
+    milliseconds millisec = duration_cast<milliseconds>(nanosec);
+
+    return millisec.count() / 1000;
+}
 
 FileSystemAdapter::FileSystemAdapter(const char* filePath) {
     fileStream.open(filePath, ios::in | ios::out | ios::binary);
@@ -72,6 +82,7 @@ bool FileSystemAdapter::writeBlocks(const char* buffer, const int blockIdx, cons
 }
 
 bool FileSystemAdapter::iterateOverInodeDataBlocks(
+
     Inode& inode,
 
     const function<void (
@@ -97,6 +108,7 @@ bool FileSystemAdapter::iterateOverInodeDataBlocks(
         const char* pBlock,
         int blockIndex
     )> indirectIndexBlockPostProcess
+
 ) {
     int sizeRemaining = inode.d_size; // 剩下的字节数。
     const char* errmsg = "";
@@ -153,7 +165,9 @@ bool FileSystemAdapter::iterateOverInodeDataBlocks(
                 goto IT_INODE_DATA_BLOCKS_FAILED;
             }
 
-            blockDiscoveryHandler(entriesPerIdxBlock, firstIdxBlockBuffer[idx]);
+            firstIdxBlockBuffer[idx] = nextBlkIdx;
+
+            blockDiscoveryHandler(entriesTargetByteOffset, firstIdxBlockBuffer[idx]);
             dataBlockPostProcess( firstIdxBlockBuffer[idx]);
 
             sizeRemaining -= MachineProps::BLOCK_SIZE;
@@ -374,6 +388,7 @@ bool FileSystemAdapter::uploadFile(const std::string& fname, std::fstream& f) {
         [] (...) {},
 
         [&] (const char* pBlock, int blockIndex) {
+            return;
             this->writeBlocks(
                 pBlock, blockIndex, 1
             );
@@ -460,10 +475,15 @@ void FileSystemAdapter::format() {
     Inode& rootInode = this->inodes[ROOT_INODE_IDX];
     rootInode.file_type = Inode::FileType::DIR;
     rootInode.d_size = 0;
+    rootInode.d_mtime = getCurrentTimeStamp();
+    rootInode.d_atime = getCurrentTimeStamp();
+    rootInode.isgid = rootInode.isuid = 0;
+    rootInode.d_gid = rootInode.d_uid = 0;
+    rootInode.ialloc = 1;
     
     this->mkdir("dev");
     this->cd("dev");
-    this->touch("tty", Inode::FileType::CHAR_DEV);
+    this->touch("tty1", Inode::FileType::CHAR_DEV);
     inodeIdxStack.pop_back(); // 回到 root。
     
     // 小彩蛋。当时debug用的，不想删了。
@@ -516,7 +536,7 @@ void FileSystemAdapter::freeBlock(int idx) {
     } else {
         Block b;
         memcpy(&b, &superBlock.s_nfree, 101 * sizeof(uint32_t));
-        writeBlock(b, superBlock.s_free[0]);
+        writeBlock(b, idx);
         superBlock.s_nfree = 1;
         superBlock.s_free[0] = idx;
     }
@@ -548,6 +568,12 @@ int FileSystemAdapter::getFreeInode() {
         this->inodes[result].permission_others = 7;
         this->inodes[result].d_size = 0;
         this->inodes[result].d_nlink = 1;
+        this->inodes[result].isgid = 0;
+        this->inodes[result].isuid = 0;
+        this->inodes[result].d_uid = 0;
+        this->inodes[result].d_gid = 0;
+        this->inodes[result].d_mtime = getCurrentTimeStamp();
+        this->inodes[result].d_atime = getCurrentTimeStamp();
         
         if (superBlock.s_ninode == 0) { // 寻找空盘 inode。
             searchForFreeInodes();
@@ -647,8 +673,18 @@ void FileSystemAdapter::ls(const InodeDirectory& dir) {
         cout << setiosflags(ios::right);
         cout << setw(4) << entryInode.d_nlink;
 
+        // 文件主。
+        cout << setw(3) << entryInode.d_gid << " :";
+        cout << setw(3) << entryInode.d_uid;
+
         // 文件大小。
         cout << setw(8) << entryInode.d_size;
+
+        // 修改时间。
+        cout << setw(12) << entryInode.d_mtime << ".m";
+        
+        // 访问时间。
+        cout << setw(12) << entryInode.d_atime << ".a";
 
         // 文件名。
         cout << " " << entry.m_name << endl;

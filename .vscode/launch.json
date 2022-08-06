@@ -6,7 +6,7 @@
             "request": "launch",
             "program": "${workspaceFolder}\\output\\fsedit.exe",
             "args": [
-                "E:\\code-repo\\unix-v6pp-filesystem-editor\\output\\c.img",
+                "${workspaceFolder}\\output\\c-back.img", // 磁盘文件路径。
                 "e"
             ],
             "stopAtEntry": false,

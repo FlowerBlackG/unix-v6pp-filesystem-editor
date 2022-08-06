@@ -20,7 +20,7 @@ public:
     uint32_t s_isize = MachineProps::INODE_ZONE_BLOCKS;
 
     /** 盘块总数。 */
-    uint32_t s_fsize = MachineProps::diskSize();
+    uint32_t s_fsize = MachineProps::diskBlocks();
 
     /** 直接管理的空闲盘块数量。 */
     uint32_t s_nfree;
@@ -43,10 +43,10 @@ public:
 
     
     /** 内存中 SuperBlock 副本被修改标志。 */
-    uint32_t s_fmod;
+    uint32_t s_fmod = 0;
     
     /** 本文件系统只能读出。 */
-    uint32_t s_ronly;
+    uint32_t s_ronly = 0;
     
     /** 最近以此更新时间。 */
     uint32_t s_time;
@@ -84,7 +84,7 @@ public:
     uint32_t swap_zone_blocks = MachineProps::SWAP_ZONE_BLOCKS;
 
     /** 空白填充。 */
-    uint32_t blank_paddings[39];
+    uint32_t blank_paddings[39] = {0};
 
 public:
     /* ------------ 方法区。 ------------ */

@@ -30,7 +30,7 @@ void usage(const char* hint = nullptr) {
     cout << "   之后，使用标准输入传递操作指令。" << endl;
     cout << endl;
     cout << "options:" << endl;
-    cout << "  c: 创建一个磁盘映像文件。大小默认为0。" << endl;
+    cout << "  c: 创建一个磁盘映像文件。大小默认为默认文件大小。" << endl;
     cout << "  m: 格式化img文件。" << endl;
     cout << "  e: 打开文件系统，并对其进行编辑操作。" << endl;
     cout << "     注意，使用损坏的img文件会造成未定义的行为。" << endl;
@@ -64,7 +64,7 @@ static int prepareImgFile(
 
         // 创建镜像文件。
         if (!ofstream(filePath).is_open()) {
-            cout << "error: failed to create img file." << endl;
+            cout << "[error 1] failed to create img file." << endl;
             return -1;
         }
 
@@ -104,7 +104,7 @@ static char readLatinChar() {
         }
     }
 
-    cout << "[error] bad stream!" << endl;
+    cout << "[error 2] bad stream!" << endl;
     cout << "        main::readLatinChar" << endl;
     exit(-1);
 }
@@ -150,7 +150,7 @@ static string readPath() {
         }
     }
 
-    cout << "[error] bad stream!" << endl;
+    cout << "[error 3] bad stream!" << endl;
     cout << "        main::readPath" << endl;
     exit(-1);
 }
@@ -235,8 +235,10 @@ static void runInteractiveCli(FileSystemAdapter& fsAdapter) {
                 
                 if (fsAdapter.cd(path)) {
                     pathSegments.push_back(path);
+                    cout << "[info] 切换路径。" << endl;
                 } else {
                     // nothing to do..
+                    cout << "[info] 试图切换路径，但没有任何事发生。" << endl;
                 }
 
             } else if (operation == 'p') { // put
@@ -244,9 +246,11 @@ static void runInteractiveCli(FileSystemAdapter& fsAdapter) {
                 string path = readPath();
                 fstream f(path, ios::in | ios::binary);
                 if (!f.is_open()) {
-                    cout << "[error] 无法打开：" << path << endl;
+                    cout << "[error 4] 无法打开：" << path << endl;
                 } else {
-                    fsAdapter.uploadFile(readPath(), f);
+                    string v6ppFileName = readPath();
+                    fsAdapter.uploadFile(v6ppFileName, f);
+                    cout << "[info 5] 上传成功：" << v6ppFileName << endl;
                 }
 
             } else if (operation == 'g') { // get
@@ -255,31 +259,34 @@ static void runInteractiveCli(FileSystemAdapter& fsAdapter) {
                 string localPath = readPath();
                 fstream f(localPath, ios::in | ios::binary);
                 if (!f.is_open()) {
-                    cout << "[error] 无法打开：" << localPath << endl;
+                    cout << "[error 6] 无法打开：" << localPath << endl;
                 } else {
-                    fsAdapter.uploadFile(v6ppPath, f);
+                    fsAdapter.downloadFile(v6ppPath, f);
+                    cout << "[info 7] 下载成功：" << v6ppPath << endl;
                 }
 
             } else if (operation == 'r') { // remove
 
                 string path = readPath();
                 int count = fsAdapter.rm(path);
-                cout << "[info] 删除文件（夹）数：" << count << endl;
+                cout << "[info 8] 删除文件（夹）数：" << count << endl;
 
             } else if (operation == 'm') { // make dir
 
                 string path = readPath();
                 fsAdapter.mkdir(path);
+                cout << "[info 9] 创建文件夹：" << path << endl;
 
             } else if (operation == 'k') { // write kernel
 
                 string path = readPath();
                 fstream f(path, ios::in | ios::binary);
                 if (!f.is_open()) {
-                    cout << "[error] 无法打开：" << path << endl;
+                    cout << "[error 10] 无法打开：" << path << endl;
                 } else {
                     fsAdapter.writeKernel(f);
                     f.close();
+                    cout << "[info 11] 内核写入完毕。" << endl;
                 }
             
             } else if (operation == 'b') { // write bootloader
@@ -287,10 +294,11 @@ static void runInteractiveCli(FileSystemAdapter& fsAdapter) {
                 string path = readPath();
                 fstream f(path, ios::in | ios::binary);
                 if (!f.is_open()) {
-                    cout << "[error] 无法打开：" << path << endl;
+                    cout << "[error 12] 无法打开：" << path << endl;
                 } else {
                     fsAdapter.writeBootLoader(f);
                     f.close();
+                    cout << "[info 13] 启动引导程序写入完毕。" << endl;
                 }
             
             } else if (operation == 'x') { // exit
@@ -332,7 +340,7 @@ int main(int argc, const char* argv[]) {
         option += 'a' - 'A';
     }
 
-    unsigned long long imgSize = 0;
+    unsigned long long imgSize = MachineProps::diskSize();
     if (argc >= 4) { // 读取用户希望的磁盘大小。
         try {
             imgSize = stoull(argv[3]);

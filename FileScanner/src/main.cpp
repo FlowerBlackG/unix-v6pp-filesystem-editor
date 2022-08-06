@@ -12,9 +12,49 @@
 using namespace std;
 using namespace std::filesystem;
 
+/**
+ * 上传路径下的所有文件（递归处理文件夹）。
+ */
+void uploadFiles(const directory_entry& entry, bool mkdir) {
+    if (entry.status().type() == file_type::directory) {
+        if (mkdir) {
+            // 创建文件夹。
+            cout << "m |" << entry.path().filename() << "|" << endl;
+            
+            // 切换路径。
+            cout << "c |" << entry.path().filename() << "|" << endl;
+        }
+
+        // 扫描文件夹。
+        for (auto& it : directory_iterator(entry.path())) {
+            uploadFiles(it, true);
+        }
+
+        if (mkdir) {
+            // 回到上级路径。
+            cout << "c |..|" << endl;
+        }
+        
+    } else if (entry.status().type() == file_type::regular) {
+        // 上传文件。
+        cout << "p |" << absolute(entry.path()) << "| "; 
+        cout << "|" << entry.path().filename() << "|" << endl;
+    }
+}
+
 int main() {
-    
+    cout << "f" << endl; // 格式化。
+    cout << "k |kernel.bin|" << endl; // 写入内核文件。
+    cout << "b |boot.bin|" << endl; // 写入 bootloader。
 
+    path root("programs");
+    if (!exists(root)) {
+        cout << "x" << endl;
+        return -1; // 异常退出。
+    }
 
+    uploadFiles(directory_entry(root), false);
+
+    cout << "x" << endl; // 退出。
     return 0;
 }
