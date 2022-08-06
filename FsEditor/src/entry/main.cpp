@@ -7,7 +7,9 @@
 #include <iostream>
 #include <string>
 #include <fstream>
+#include <vector>
 #include <filesystem>
+#include <cstring>
 #include "../include/MacroDefines.h"
 #include "../include/structures/Inode.h"
 #include "../include/FileSystemAdapter.h"
@@ -46,7 +48,7 @@ void usage(const char* hint = nullptr) {
     cout << "> b [file path]: 写入 bootloader 文件。" << endl;
     cout << "> x: 退出（并存盘）。" << endl;
     cout << endl;
-    cout << "all path should be surrounded by a pair of '|'" << endl;
+    cout << "路径使用 '|' 分隔。" << endl;
     cout << "example: > b |C://Program Files/soft/soft.exe|" << endl;
 }
 
@@ -71,8 +73,6 @@ static int prepareImgFile(
             resize_file(filePath, imgSize);
         }
     }
-
-    
 
     int result = 0;
     
@@ -105,48 +105,214 @@ static char readLatinChar() {
     }
 
     cout << "[error] bad stream!" << endl;
+    cout << "        main::readLatinChar" << endl;
     exit(-1);
+}
+
+static string readPath() {
+    string res;
+    int ch;
+
+    /**
+     * 读取状态。
+     * 0: 未遇到第一个竖线。
+     * 1: 遇到了竖线，还没遇到有意义字符。
+     * 2: 正在读路径。
+     */
+    int readingStatus = 0;
+    while ((ch = cin.get()) != EOF) {
+        
+        if (ch == '|') {
+            if (readingStatus == 2) { // 读取结束。
+                while (res.length() && (
+                        strchr("\'\" ", res.back()) 
+                        || res.back() > 126 
+                        || res.back() < 33
+                    )
+                ) {
+                    res.pop_back();
+                }
+                
+                return res; 
+            } else {
+                readingStatus = 1; // 开始读取。
+                continue;
+            }
+        }
+
+        if (readingStatus == 1 && ch >= 33 && ch <= 126 && ch != '\'' && ch != '\"') {
+            // ascii 可见范围为 33~126 (不含空格)。
+            readingStatus = 2;
+        }
+
+        if (readingStatus == 2 && ch >= 32 && ch <= 126) {
+            res += char(ch);
+        }
+    }
+
+    cout << "[error] bad stream!" << endl;
+    cout << "        main::readPath" << endl;
+    exit(-1);
+}
+
+
+static void readPath(vector<string>& pathSegments) {
+    string pathStr = readPath();
+
+    int currBeginIdx = 0;
+    if (strchr("\\/", pathStr[0])) {
+        currBeginIdx++;
+        pathSegments.clear();
+    }
+
+    for (int searchIdx = currBeginIdx; searchIdx < pathStr.length(); searchIdx++) {
+        if (searchIdx == currBeginIdx && (pathStr[searchIdx] < 33 || pathStr[searchIdx] > 126)) {
+            currBeginIdx++;
+        } else if (strchr("\\/", pathStr[searchIdx])) { // 检测到分隔符。
+
+            // 提取。
+            string segStr = pathStr.substr(currBeginIdx, searchIdx - currBeginIdx);
+            
+            // 去除无意义字符。
+            while (segStr.length() > 0 && (segStr.back() < 33 || segStr.back() > 126)) {
+                segStr.pop_back();
+            }
+
+            if (segStr.length() > 0) {
+                if (segStr == "..") {
+                    if (pathSegments.size() > 0) {
+                        pathSegments.pop_back();
+                    }
+                } else if (segStr == ".") {
+                    // nothing to do..
+                } else {
+                    pathSegments.push_back(segStr);
+                }
+            }
+
+            currBeginIdx = searchIdx + 1; // 更新位置。
+        }
+    }
 }
 
 /**
  * 交互式命令行界面。 
  */
 static void runInteractiveCli(FileSystemAdapter& fsAdapter) {
+    vector<string> pathSegments;
+
     while (true) {
+        // 输出 path。
+        cout << '[';
+        for (int idx = 0; idx < pathSegments.size(); idx++) {
+            if (idx > 0) {
+                cout << "/";
+            }
+
+            cout << pathSegments[idx];
+        }
+
+        cout << "] > ";
+
         int operation = readLatinChar();
 
-        if (operation == 'h') {
-            usage();
-        } else if (operation == 'f') {
-            // todo
-        } else if (operation == 'l') {
-            // todo
-        } else if (operation == 'c') {
-            // todo
-        } else if (operation == 'p') {
-            // todo
-        } else if (operation == 'g') {
-            // todo
-        } else if (operation == 'r') {
-            // todo
-        } else if (operation == 'm') {
-            // todo
-        } else if (operation == 'k') {
-            // todo
-        } else if (operation == 'b') {
-            // todo
-        } else if (operation == 'x') {
-            // todo
-        } else {
-            string msg = "未知选项：";
-            msg += char(operation);
-            msg += " (";
-            msg += to_string(operation);
-            msg += ")"; 
-            usage(msg.c_str());
-        }
-        // 注：你知道为什么要用一堆 if else，而不是一个 switch 么...
+        try {
+            if (operation == 'h') { // help
 
+                usage();
+
+            } else if (operation == 'f') { // format
+
+                fsAdapter.format();
+
+            } else if (operation == 'l') { // list
+
+                fsAdapter.ls();
+
+            } else if (operation == 'c') { // change dir
+
+                string path = readPath();
+                
+                if (fsAdapter.cd(path)) {
+                    pathSegments.push_back(path);
+                } else {
+                    // nothing to do..
+                }
+
+            } else if (operation == 'p') { // put
+
+                string path = readPath();
+                fstream f(path, ios::in | ios::binary);
+                if (!f.is_open()) {
+                    cout << "[error] 无法打开：" << path << endl;
+                } else {
+                    fsAdapter.uploadFile(readPath(), f);
+                }
+
+            } else if (operation == 'g') { // get
+
+                string v6ppPath = readPath();
+                string localPath = readPath();
+                fstream f(localPath, ios::in | ios::binary);
+                if (!f.is_open()) {
+                    cout << "[error] 无法打开：" << localPath << endl;
+                } else {
+                    fsAdapter.uploadFile(v6ppPath, f);
+                }
+
+            } else if (operation == 'r') { // remove
+
+                string path = readPath();
+                int count = fsAdapter.rm(path);
+                cout << "[info] 删除文件（夹）数：" << count << endl;
+
+            } else if (operation == 'm') { // make dir
+
+                string path = readPath();
+                fsAdapter.mkdir(path);
+
+            } else if (operation == 'k') { // write kernel
+
+                string path = readPath();
+                fstream f(path, ios::in | ios::binary);
+                if (!f.is_open()) {
+                    cout << "[error] 无法打开：" << path << endl;
+                } else {
+                    fsAdapter.writeKernel(f);
+                    f.close();
+                }
+            
+            } else if (operation == 'b') { // write bootloader
+            
+                string path = readPath();
+                fstream f(path, ios::in | ios::binary);
+                if (!f.is_open()) {
+                    cout << "[error] 无法打开：" << path << endl;
+                } else {
+                    fsAdapter.writeBootLoader(f);
+                    f.close();
+                }
+            
+            } else if (operation == 'x') { // exit
+            
+                fsAdapter.sync();
+                cout << "bye!" << endl;
+                break; // 结束。
+            
+            } else {
+            
+                string msg = "未知选项：";
+                msg += char(operation);
+                msg += " (";
+                msg += to_string(operation);
+                msg += ")"; 
+                usage(msg.c_str());
+            
+            }
+            // 注：你知道为什么要用一堆 if else，而不是一个 switch 么...
+        } catch (const runtime_error& e) {
+            cout << "异常捕获：" << e.what() << endl;
+        }
     }
 }
 
@@ -177,6 +343,7 @@ int main(int argc, const char* argv[]) {
 
     if (prepareImgFile(imgPath, option, imgSize) == 0) {
         FileSystemAdapter fsAdapter(imgPath);
+        fsAdapter.load();
         runInteractiveCli(fsAdapter);
         return 0;
     } else {

@@ -8,7 +8,10 @@
 #include <fstream>
 #include <iostream>
 #include <iomanip>
+#include <functional>
 #include <cmath>
+#include <cstring>
+#include <cstdint>
 #include "../include/FileSystemAdapter.h"
 #include "../include/MachineProps.h"
 #include "../include/structures/Inode.h"
@@ -21,6 +24,7 @@ using namespace std;
 FileSystemAdapter::FileSystemAdapter(const char* filePath) {
     fileStream.open(filePath, ios::in | ios::out | ios::binary);
     // 别忘了加 binary。这个 bug 找了一晚上...
+    // sj: ”0x1a？那要打屁股了。“
 
     if (!fileStream.is_open()) {
         throw runtime_error("failed to open file!");
@@ -38,7 +42,7 @@ FileSystemAdapter::FileSystemAdapter(const char* filePath) {
 
 FileSystemAdapter::~FileSystemAdapter() {
     if (fileStream.is_open()) {
-        flush();
+        sync();
         fileStream.close();
     }
 }
@@ -67,18 +71,35 @@ bool FileSystemAdapter::writeBlocks(const char* buffer, const int blockIdx, cons
     return true;
 }
 
-bool FileSystemAdapter::readFile(char* buffer, const Inode& inode) {
-    int sizeRemaining = inode.d_size; // 剩下待读入的字节数。
+bool FileSystemAdapter::iterateOverInodeDataBlocks(
+    Inode& inode,
 
-    // 直接索引读入。
-    for (int idx = 0; sizeRemaining > 0 && idx < 6; idx++) {
-        this->readBlocks(
-            buffer + sizeof(Block) * idx,
-            inode.direct_index[idx], 1
-        );
+    const function<void (
+        int dataByteOffset,
+        int blockIdx
+    )> blockDiscoveryHandler,
 
-        sizeRemaining -= sizeof(Block);
-    }
+    const function<int (
+        int prevBlockIdx
+    )> blockAllocator,
+
+    const function<void (
+        Inode& inode,
+        int sizeRemaining,
+        const char* msg
+    )> iterationFailedHandler,
+
+    const function<void (
+        int dataBlockIdx
+    )> dataBlockPostProcess,
+
+    const function<void (
+        const char* pBlock,
+        int blockIndex
+    )> indirectIndexBlockPostProcess
+) {
+    int sizeRemaining = inode.d_size; // 剩下的字节数。
+    const char* errmsg = "";
 
     // 每个索引块的块条目数。
     const int entriesPerIdxBlock = sizeof(Block) / sizeof(uint32_t);
@@ -86,9 +107,36 @@ bool FileSystemAdapter::readFile(char* buffer, const Inode& inode) {
     uint32_t secondIdxBlockBuffer[entriesPerIdxBlock]; // 二级索引块缓存。
     // 上面这两个东西总共占用 1KB 栈空间，问题不大。
 
+    // 直接索引读入。
+    for (int idx = 0; sizeRemaining > 0 && idx < 6; idx++) {
+
+        uint32_t nextBlkIdx = blockAllocator(inode.direct_index[idx]);
+        if (nextBlkIdx < 0) {
+            errmsg = "direct index, block allocation failed.";
+            goto IT_INODE_DATA_BLOCKS_FAILED;
+        }
+
+        inode.direct_index[idx] = nextBlkIdx;
+        blockDiscoveryHandler(sizeof(Block) * idx, inode.direct_index[idx]);
+        dataBlockPostProcess(inode.direct_index[idx]);
+
+        sizeRemaining -= sizeof(Block);
+        
+        if (sizeRemaining == -256) {
+            int x;
+        }
+    }
+
     // 一级索引读入。
     for (int firIdxBlockIdx = 0; firIdxBlockIdx < 2 && sizeRemaining > 0; firIdxBlockIdx++) {
+        uint32_t nextBlkIdx = blockAllocator(inode.indirect_index[firIdxBlockIdx]);
+        if (nextBlkIdx < 0) {
+            errmsg = "fir indirect index, block allocation failed.";
+            goto IT_INODE_DATA_BLOCKS_FAILED;
+        }
 
+        inode.indirect_index[firIdxBlockIdx] = nextBlkIdx;
+        
         this->readBlocks(
             (char*) firstIdxBlockBuffer,
             inode.indirect_index[firIdxBlockIdx], 1
@@ -99,17 +147,31 @@ bool FileSystemAdapter::readFile(char* buffer, const Inode& inode) {
             int entriesTargetByteOffset = MachineProps::BLOCK_SIZE 
                 * (6 + entriesPerIdxBlock * firIdxBlockIdx + idx);
 
-            this->readBlocks(
-                buffer + entriesTargetByteOffset,
-                inode.direct_index[idx], 1
-            );
+            uint32_t nextBlkIdx = blockAllocator(inode.indirect_index[firIdxBlockIdx]);
+            if (nextBlkIdx < 0) {
+                errmsg = "fir indirect index, block allocation failed (direct).";
+                goto IT_INODE_DATA_BLOCKS_FAILED;
+            }
+
+            blockDiscoveryHandler(entriesPerIdxBlock, firstIdxBlockBuffer[idx]);
+            dataBlockPostProcess( firstIdxBlockBuffer[idx]);
 
             sizeRemaining -= MachineProps::BLOCK_SIZE;
+            
         } // for (int idx = 0; sizeRemaining > 0 && idx < 6; idx++)
+
+        indirectIndexBlockPostProcess((char*) firstIdxBlockBuffer, nextBlkIdx);
     } // for (int firIdxBlockIdx = 0; firIdxBlockIdx < 2 && sizeRemaining > 0; firIdxBlockIdx++)
 
     // 二级索引读入。
     for (int secIdxBlockIdx = 0; secIdxBlockIdx < 2 && sizeRemaining > 0; secIdxBlockIdx++) {
+        uint32_t nextBlkIdx = blockAllocator(inode.secondary_indirect_index[secIdxBlockIdx]);
+        if (nextBlkIdx < 0) {
+            errmsg = "sec indirect index, block allocation failed.";
+            goto IT_INODE_DATA_BLOCKS_FAILED;
+        }
+        inode.secondary_indirect_index[secIdxBlockIdx] = nextBlkIdx;
+
         this->readBlocks(
             (char*) secondIdxBlockBuffer, 
             inode.secondary_indirect_index[secIdxBlockIdx], 1
@@ -121,141 +183,202 @@ bool FileSystemAdapter::readFile(char* buffer, const Inode& inode) {
             firIdxBlockIdx < entriesPerIdxBlock && sizeRemaining > 0; 
             firIdxBlockIdx++
         ) {
+            uint32_t nextBlkIdx = blockAllocator(secondIdxBlockBuffer[firIdxBlockIdx]);
+            if (nextBlkIdx < 0) {
+                errmsg = "sec indirect index, block allocation failed (fir).";
+                goto IT_INODE_DATA_BLOCKS_FAILED;
+            }
+            secondIdxBlockBuffer[firIdxBlockIdx] = nextBlkIdx;
 
             this->readBlocks(
                 (char*) firstIdxBlockBuffer,
-                inode.indirect_index[firIdxBlockIdx], 1
+                secondIdxBlockBuffer[firIdxBlockIdx], 1
             );
 
             // 内部：直接索引。
             for (int idx = 0; sizeRemaining > 0 && idx < entriesPerIdxBlock; idx++) {
-                int entriesTargetByteOffset = MachineProps::BLOCK_SIZE 
-                    * (
-                        6 
-                        + 2 * entriesPerIdxBlock 
-                        + entriesPerIdxBlock * entriesPerIdxBlock * secIdxBlockIdx 
-                        + entriesPerIdxBlock * firIdxBlockIdx 
-                        + idx
-                    );
 
-                this->readBlocks(
-                    buffer + entriesTargetByteOffset,
-                    inode.direct_index[idx], 1
+                uint32_t nextBlkIdx = blockAllocator(firstIdxBlockBuffer[idx]);
+                if (nextBlkIdx < 0) {
+                    errmsg = "sec indirect index, block allocation failed (fir).";
+                    goto IT_INODE_DATA_BLOCKS_FAILED;
+                }
+                firstIdxBlockBuffer[idx] = nextBlkIdx;
+
+                int entriesTargetByteOffset = sizeof(Block) * (
+                    6 
+                    + 2 * entriesPerIdxBlock 
+                    + entriesPerIdxBlock * entriesPerIdxBlock * secIdxBlockIdx 
+                    + entriesPerIdxBlock * firIdxBlockIdx 
+                    + idx
                 );
 
-                sizeRemaining -= MachineProps::BLOCK_SIZE;
+                blockDiscoveryHandler(entriesTargetByteOffset, firstIdxBlockBuffer[idx]);
+                dataBlockPostProcess(firstIdxBlockBuffer[idx]);
+
+                sizeRemaining -= sizeof(Block);
+                
             } // for (int idx = 0; sizeRemaining > 0 && idx < 6; idx++)
+
+            indirectIndexBlockPostProcess((char*) firstIdxBlockBuffer, nextBlkIdx);
         } // 内部：一级索引。
+        
+        indirectIndexBlockPostProcess((char*) secondIdxBlockBuffer, nextBlkIdx);
     }
 
     return true;
+
+IT_INODE_DATA_BLOCKS_FAILED:
+    iterationFailedHandler(inode, sizeRemaining, errmsg);
+    return false;
+
+}
+
+bool FileSystemAdapter::readFile(char* buffer, Inode& inode) {
+
+    return this->iterateOverInodeDataBlocks(
+        inode,
+        [&] (int dataByteOffset, int blockIdx) {
+            readBlocks(buffer + dataByteOffset, blockIdx, 1);
+        },
+
+        [] (int prevBlockIdx) {
+            return prevBlockIdx;
+        },
+
+        [] (Inode& inode, int sizeRemaining, const char* msg) {
+            cout << "[error] lambda 异常。" << endl;
+        },
+
+        [] (...) {},
+
+        [] (...) {} // 不需要做后处理。
+    );
 }
 
 
 bool FileSystemAdapter::writeFile(char* buffer, Inode& inode, int filesize) {
+    this->freeInodeBlocks(inode);
+
     int filesizeRemaining = min(filesize, FileSystemAdapter::FS_FILE_SIZE_MAX);
     inode.d_size = filesizeRemaining;
     inode.ilarg = !!(filesizeRemaining > sizeof(Block) * 6);
     // 开放所有权限。
     inode.permission_group = inode.permission_others = inode.permission_owner = 7;
 
-    for (int idx = 0; idx < 6 && filesizeRemaining > 0; idx++) {
-        int nextBlk = this->getFreeBlock();
-        if (nextBlk < 0) {
-            cout << "写入失败。盘满。" << endl;
-            return false;
-        }
+    return this->iterateOverInodeDataBlocks(
+        inode, 
+        
+        [&] (int dataByteOffset, int blockIdx) {
+            this->writeBlocks(
+                buffer + dataByteOffset, blockIdx, 1
+            );
+        },
 
-        this->writeBlocks(buffer + idx * sizeof(Block), nextBlk, 1);
-        inode.direct_index[idx] = nextBlk;
-        filesizeRemaining -= sizeof(Block);
+        [&] (int prevBlockIdx) {
+            return this->getFreeBlock();
+        },
+
+        [&] (Inode& inode, int sizeRemaining, const char* msg) {
+            inode.d_size -= sizeRemaining;
+            cout << "[error] lambda 异常（可能的原因：盘满）。" << endl;
+        },
+
+        [] (...) {},
+
+        [&] (const char* pBlock, int blockIndex) {
+            this->writeBlocks(
+                pBlock, blockIndex, 1
+            );
+        }
+    );
+}
+
+bool FileSystemAdapter::downloadFile(const std::string& fname, std::fstream& f) {
+    InodeDirectory dir(this->inodes[inodeIdxStack.back()], *this, false, 1);
+    
+    int targetIdx = -1;
+
+    // 寻找目标。
+    for (int entryIdx = 0; entryIdx < dir.length; entryIdx++) {
+        if (dir.entries[entryIdx].m_name == fname) {
+            targetIdx = dir.entries[entryIdx].m_ino;
+            break;
+        }
     }
 
-    // 每个索引块的块条目数。
-    const int entriesPerIdxBlock = sizeof(Block) / sizeof(uint32_t);
-    uint32_t firstIdxBlockBuffer[entriesPerIdxBlock]; // 一级索引块缓存。
-    uint32_t secondIdxBlockBuffer[entriesPerIdxBlock]; // 二级索引块缓存。
-    // 上面这两个东西总共占用 1KB 栈空间，问题不大。
-
-    // 一级索引。
-    for (int firIdxBlockIdx = 0; firIdxBlockIdx < 2 && filesizeRemaining > 0; firIdxBlockIdx++) {
-
-        // 内部：直接索引。
-        for (int idx = 0; filesizeRemaining > 0 && idx < entriesPerIdxBlock; idx++) {
-            int entriesTargetByteOffset = sizeof(Block) * (6 + entriesPerIdxBlock * firIdxBlockIdx + idx);
-
-            int blkIdx = getFreeBlock();
-            if (blkIdx < 0) {
-                cout << "盘满。存盘失败。" << endl;
-                return false;
-            }
-
-            this->writeBlocks(buffer + entriesTargetByteOffset, blkIdx, 1);
-            firstIdxBlockBuffer[idx] = blkIdx;
-            
-            filesizeRemaining -= sizeof(Block);
-        } // for (int idx = 0; filesizeRemaining > 0 && idx < 6; idx++)
-
-        int blkIdx = getFreeBlock();
-        if (blkIdx < 0) {
-            cout << "盘满。存盘失败。" << endl;
-            return false;
-        }
-
-        this->writeBlocks((char*) firstIdxBlockBuffer, blkIdx, 1);
-        inode.indirect_index[firIdxBlockIdx] = blkIdx;
-    } // for (int firIdxBlockIdx = 0; firIdxBlockIdx < 2 && filesizeRemaining > 0; firIdxBlockIdx++)
-
-    // 二级索引。
-    for (int secIdxBlockIdx = 0; secIdxBlockIdx < 2 && filesizeRemaining > 0; secIdxBlockIdx++) {
-        // 内部：一级索引。
-        for (
-            int firIdxBlockIdx = 0; 
-            firIdxBlockIdx < entriesPerIdxBlock && filesizeRemaining > 0; 
-            firIdxBlockIdx++
-        ) {
-            // 内部：直接索引。
-            for (int idx = 0; filesizeRemaining > 0 && idx < entriesPerIdxBlock; idx++) {
-                int entriesTargetByteOffset = sizeof(Block) 
-                    * (
-                        6 
-                        + 2 * entriesPerIdxBlock 
-                        + entriesPerIdxBlock * entriesPerIdxBlock * secIdxBlockIdx 
-                        + entriesPerIdxBlock * firIdxBlockIdx 
-                        + idx
-                    );
-
-                int blkIdx = getFreeBlock();
-                if (blkIdx < 0) {
-                    cout << "盘满。存盘失败。" << endl;
-                    return false;
-                }
-
-                this->writeBlocks(buffer + entriesTargetByteOffset, blkIdx, 1);
-                firstIdxBlockBuffer[idx] = blkIdx;
-
-                filesizeRemaining -= sizeof(Block);
-            } // for (int idx = 0; filesizeRemaining > 0 && idx < 6; idx++)
-
-            int blkIdx = getFreeBlock();
-            if (blkIdx < 0) {
-                cout << "盘满。存盘失败。" << endl;
-                return false;
-            }
-            this->writeBlocks((char*) firstIdxBlockBuffer, blkIdx, 1);
-            secondIdxBlockBuffer[firIdxBlockIdx] = blkIdx;
-        } // 内部：一级索引。
-
-        int blkIdx = getFreeBlock();
-        if (blkIdx < 0) {
-            cout << "盘满。存盘失败。" << endl;
-            return false;
-        }
-        this->writeBlocks((char*) secondIdxBlockBuffer, blkIdx, 1);
-        inode.secondary_indirect_index[secIdxBlockIdx] = blkIdx;
+    if (targetIdx < 0) {
+        cout << "[error] 找不到：" << fname << endl;
+        return false;
     }
 
-    return true;
+    f.clear();
+    f.seekp(0, ios::beg);
+
+    return this->iterateOverInodeDataBlocks(
+        this->inodes[targetIdx],
+
+        [&] (int, int blockIdx) {
+            Block b;
+            this->readBlock(b, blockIdx);
+            f.write(
+                b.asCharArray(), 
+                min(
+                    sizeof(b), // 完整写入。
+                    (size_t) this->inodes[targetIdx].d_size - f.tellp() // 最后一个 block。
+                )
+            );
+        },
+
+        [] (int prevIdx) { return prevIdx; },
+        [] (...) {},
+        [] (...) {},
+        [] (...) {}
+    );
+}
+
+bool FileSystemAdapter::uploadFile(const std::string& fname, std::fstream& f) {
+    Inode& inode = this->inodes[this->touch(fname, Inode::FileType::NORMAL)];
+    this->freeInodeBlocks(inode);
+
+    f.clear();
+    f.seekg(0, ios::end);
+    int filesize = f.tellg();
+
+    int filesizeRemaining = min(filesize, FileSystemAdapter::FS_FILE_SIZE_MAX);
+    inode.d_size = filesizeRemaining;
+    inode.ilarg = !!(filesizeRemaining > sizeof(Block) * 6);
+    // 开放所有权限。
+    inode.permission_group = inode.permission_others = inode.permission_owner = 7;
+
+    f.seekg(0, ios::beg);
+
+    return this->iterateOverInodeDataBlocks(
+        inode, 
+        
+        [&] (int dataByteOffset, int blockIdx) {
+            Block b;
+            f.read(b.asCharArray(), sizeof(b));
+            this->writeBlock(b, blockIdx);
+        },
+
+        [&] (int prevBlockIdx) {
+            return this->getFreeBlock();
+        },
+
+        [&] (Inode& inode, int sizeRemaining, const char* msg) {
+            inode.d_size -= sizeRemaining;
+            cout << "[error] lambda 异常（可能的原因：盘满）。" << endl;
+        },
+
+        [] (...) {},
+
+        [&] (const char* pBlock, int blockIndex) {
+            this->writeBlocks(
+                pBlock, blockIndex, 1
+            );
+        }
+    );
 }
 
 void FileSystemAdapter::load() {
@@ -286,9 +409,11 @@ void FileSystemAdapter::load() {
     }
 
     fileSystemLoaded = true;
+    inodeIdxStack.clear();
+    inodeIdxStack.push_back(ROOT_INODE_IDX);
 }
 
-void FileSystemAdapter::flush() {
+void FileSystemAdapter::sync() {
     this->superBlock.writeToImg(this->fileStream);
 
     this->fileStream.clear();
@@ -300,8 +425,49 @@ void FileSystemAdapter::flush() {
     fileStream.write((char*) this->inodes, this->superBlock.inode_zone_blocks * sizeof(Block));
 }
 
+/**
+ * 格式化。
+ */
 void FileSystemAdapter::format() {
-    // todo
+    this->superBlock.loadDefaultProfile(); // 重置 superblock。
+
+    // 释放 inode。
+    for (
+        int idx = ROOT_INODE_IDX + 1; 
+        idx < MachineProps::INODE_ZONE_BLOCKS * sizeof(Block) / sizeof(Inode); 
+        idx++
+    ) {
+        this->freeInode(idx);
+    }
+
+    // 链接所有 block。
+    for (
+        int idx = superBlock.data_zone_begin;
+        idx < superBlock.data_zone_begin + superBlock.data_zone_blocks;
+        idx++
+    ) {
+        this->freeBlock(idx);
+    }
+
+    char zeroFillBuf[sizeof(Block)];
+    memset(zeroFillBuf, 0, sizeof(Block));
+    this->writeBlocks(zeroFillBuf, superBlock.data_zone_begin, sizeof(Block));
+
+    // 创建 root 目录，并写入 dev/tty1。
+    
+    inodeIdxStack.clear();
+    inodeIdxStack.push_back(ROOT_INODE_IDX);
+    Inode& rootInode = this->inodes[ROOT_INODE_IDX];
+    rootInode.file_type = Inode::FileType::DIR;
+    rootInode.d_size = 0;
+    
+    this->mkdir("dev");
+    this->cd("dev");
+    this->touch("tty", Inode::FileType::CHAR_DEV);
+    inodeIdxStack.pop_back(); // 回到 root。
+    
+    // 小彩蛋。当时debug用的，不想删了。
+    this->touch("tongji-yyds", Inode::FileType::NORMAL); 
 }
 
 void FileSystemAdapter::writeKernel(fstream& kernelFile) {
@@ -357,34 +523,80 @@ void FileSystemAdapter::freeBlock(int idx) {
 }
 
 int FileSystemAdapter::getFreeInode() {
-    if (superBlock.s_ninode == 0) {
-        return -1; // 无空 inode。
-    } else if (superBlock.s_ninode >= 2) {
-        return superBlock.s_inode[--superBlock.s_nfree];
-    } else {
-        int result = superBlock.s_inode[0];
-        Block b;
-        readBlock(b, result);
-        memcpy(&superBlock.s_ninode, &b, 101 * sizeof(uint32_t));
-        return result;
+    auto searchForFreeInodes = [&] () {
+        for (
+            int idx = ROOT_INODE_IDX + 1; 
+            idx < sizeof(this->inodes) / sizeof(Inode) && superBlock.s_ninode < 100;
+            idx++
+        ) {
+            if (this->inodes[idx].ialloc == 0) {
+                superBlock.s_inode[superBlock.s_ninode++] = idx;
+            }
+        }
+    };
+
+    if (superBlock.s_ninode == 0) { // 寻找空盘 inode。
+        searchForFreeInodes();
     }
+    
+    if (superBlock.s_ninode > 0) {
+        int result = superBlock.s_inode[--superBlock.s_ninode];
+
+        this->inodes[result].ialloc = 1; // 表示已经被分配。
+        this->inodes[result].permission_group = 7;
+        this->inodes[result].permission_owner = 7;
+        this->inodes[result].permission_others = 7;
+        this->inodes[result].d_size = 0;
+        this->inodes[result].d_nlink = 1;
+        
+        if (superBlock.s_ninode == 0) { // 寻找空盘 inode。
+            searchForFreeInodes();
+        }
+
+        return result;
+    } else {
+        return -1; // 获取失败。
+    }
+}
+
+void FileSystemAdapter::freeInodeBlocks(Inode& inode) {
+    this->iterateOverInodeDataBlocks(
+        inode,
+
+        [] (...) {}, // nothing..
+
+        [] (int prevBlockIdx) {
+            return prevBlockIdx;
+        },
+
+        [] (...) {}, // nothing...
+
+        [&] (int dataBlockIdx) {
+            this->freeBlock(dataBlockIdx);
+        },
+
+        [&] (const char* pBlock, int blockIndex) {
+            this->freeBlock(blockIndex);
+        }
+    );
+
+    inode.d_size = 0;
 }
 
 void FileSystemAdapter::freeInode(int idx, bool freeBlocks) {
+    Inode& inode = this->inodes[idx];
+    
     if (freeBlocks) {
-        Inode& inode = this->inodes[idx]; // todo
+        this->freeInodeBlocks(inode);
     }
+
+    inode.loadEmptyProfile();
 
     if (superBlock.s_ninode < 100) {
         superBlock.s_inode[superBlock.s_ninode++] = idx;
-    } else {
-        Block b;
-        memcpy(&b, &superBlock.s_ninode, 101 * sizeof(uint32_t));
-        writeBlock(b, superBlock.s_inode[0]);
-        superBlock.s_ninode = 1;
-        superBlock.s_inode[0] = idx;
     }
 }
+
 
 /* ------------ 文件系统用户界面操作。 ------------ */
 
@@ -445,12 +657,16 @@ void FileSystemAdapter::ls(const InodeDirectory& dir) {
     }
 }
 
-void FileSystemAdapter::ls(const Inode& inode) {
-    this->ls(InodeDirectory(inode, *this));
+void FileSystemAdapter::ls(Inode& inode) {
+    this->ls(InodeDirectory(inode, *this, false));
+}
+
+void FileSystemAdapter::ls() {
+    this->ls(this->inodes[inodeIdxStack.back()]);
 }
 
 void FileSystemAdapter::ls(const vector<string>& pathSegments, bool fromRoot) {
-    int currInodeIdx = fromRoot ? 0 : this->userInodeIdx;
+    int currInodeIdx = fromRoot ? FileSystemAdapter::ROOT_INODE_IDX : inodeIdxStack.back();
 
     cout << "[info] 正在打开：" << (fromRoot ? "根目录" : "当前目录") << endl;
 
@@ -486,4 +702,156 @@ void FileSystemAdapter::ls(const vector<string>& pathSegments, bool fromRoot) {
 
     ls(inodes[currInodeIdx]);
 
+}
+
+
+bool FileSystemAdapter::cd(const string& folderName) {
+    if (folderName == "\\" || folderName == "/") {
+        inodeIdxStack.clear();
+        inodeIdxStack.push_back(ROOT_INODE_IDX);
+        return true;
+    } else if (folderName == ".") {
+        // nothing
+        return true;
+    } else if (folderName == "..") {
+        if (inodeIdxStack.size() > 1) {
+            inodeIdxStack.pop_back();
+            return true;
+        } else {
+            return false;
+        }
+    }
+
+    InodeDirectory dir(this->inodes[inodeIdxStack.back()], *this, false);
+    
+    for (int entryIdx = 0; entryIdx < dir.length; entryIdx++) {
+        
+        if (dir.entries[entryIdx].m_name == folderName) {
+            Inode& inode = this->inodes[dir.entries[entryIdx].m_ino];
+            if (inode.file_type != Inode::FileType::DIR) {
+                cout << "[error] 名字：" << folderName << " 不是文件夹。" << endl;
+                return false;
+            } else {
+                inodeIdxStack.push_back(dir.entries[entryIdx].m_ino);
+                return true;
+            }
+        }
+    }
+
+    cout << "[error] 找不到：" << folderName << endl;
+    return false;
+}
+
+int FileSystemAdapter::mkdir(const string& dirName) {
+    int inodeIdx = touch(dirName, Inode::FileType::DIR);
+    if (inodeIdx < 0) {
+        cout << "[error] 无法创建文件夹。" << endl;
+    } else {
+        Inode& inode = this->inodes[inodeIdx];
+        inode.d_size = 0;
+    }
+}
+
+int FileSystemAdapter::removeChildren(Inode& inode) {
+    if (inode.d_size == 0) {
+        return 0;
+    }
+
+    if (inode.file_type != Inode::FileType::DIR) {
+        this->freeInodeBlocks(inode);
+        return 1;
+    } else {
+        int result = 0;
+        
+        InodeDirectory dir(inode, *this, false, 1);
+        this->freeInodeBlocks(inode);
+        for (int entryIdx = 0; entryIdx < dir.length; entryIdx++) {
+            cout << "[info] 删除：" << dir.entries[entryIdx].m_name << endl;
+            result += removeChildren(inodes[dir.entries[entryIdx].m_ino]);
+        }
+        
+        return result;
+    }
+}
+
+/**
+ * rm -rf 
+ */
+int FileSystemAdapter::rm(const std::string& path) {
+    InodeDirectory dir(this->inodes[inodeIdxStack.back()], *this, false, 1);
+    
+    int targetIdx = -1;
+    int entryIdx;
+
+    // 寻找删除目标。
+    for (entryIdx = 0; entryIdx < dir.length; entryIdx++) {
+        if (dir.entries[entryIdx].m_name == path) {
+            targetIdx = dir.entries[entryIdx].m_ino;
+            break;
+        }
+    }
+
+    if (targetIdx < 0) {
+        cout << "[error] 找不到：" << path << endl;
+    }
+
+    Inode& targetInode = this->inodes[targetIdx];
+    int result = removeChildren(targetInode);
+
+    // 目录项移除。
+    for (int idx = entryIdx; idx + 1 < dir.length; idx++) {
+        memcpy(dir.entries + idx, dir.entries + idx + 1, sizeof(DirectoryEntry));
+    }
+
+    dir.length--;
+
+    this->writeFile(
+        (char*) dir.entries, 
+        this->inodes[inodeIdxStack.back()], 
+        dir.length * sizeof(DirectoryEntry)
+    );
+
+    return result;
+}
+
+
+int FileSystemAdapter::touch(const std::string& fileName, Inode::FileType type) {
+
+    InodeDirectory dir(this->inodes[inodeIdxStack.back()], *this, false, 1);
+    
+    // 同名校验。
+    for (int entryIdx = 0; entryIdx < dir.length; entryIdx++) {
+        if (dir.entries[entryIdx].m_name == fileName) {
+            cout << "[info] 该文件已存在。" << endl;
+            return dir.entries[entryIdx].m_ino;
+        }
+    }
+
+    // 新建。
+    int inodeIdx = this->getFreeInode();
+
+
+    if (inodeIdx < 0) {
+        cout << "[error] 无法获取空 inode。" << endl;
+        return -1;
+    } else {
+        Inode& inode = this->inodes[inodeIdx];
+        inode.file_type = type;
+
+        dir.entries[dir.length].m_ino = inodeIdx;
+        memcpy(
+            dir.entries[dir.length].m_name, 
+            fileName.c_str(), 
+            min(fileName.length() + 1, sizeof(DirectoryEntry::m_name))
+        );
+        dir.length++;
+
+        this->writeFile(
+            (char*) dir.entries, 
+            this->inodes[inodeIdxStack.back()], 
+            dir.length * sizeof(DirectoryEntry)
+        );
+
+        return inodeIdx;
+    }
 }

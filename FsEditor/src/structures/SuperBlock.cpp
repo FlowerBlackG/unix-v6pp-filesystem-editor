@@ -5,6 +5,7 @@
  */
 
 #include <fstream>
+#include <cstring>
 #include "../include/structures/SuperBlock.h"
 
 using namespace std;
@@ -27,4 +28,13 @@ bool SuperBlock::loadFromImg(fstream& f, const int blockOffset) {
     );
     f.read(this->asCharArray(), sizeof(SuperBlock));
     return f.gcount() == sizeof(SuperBlock);
+}
+
+void SuperBlock::loadDefaultProfile() {
+    SuperBlock sb;
+    sb.s_ninode = 0;
+    sb.s_nfree = 0;
+    sb.s_ronly = 0;
+    sb.s_ilock = sb.s_flock = 0;
+    memcpy(this, &sb, sizeof(sb));
 }

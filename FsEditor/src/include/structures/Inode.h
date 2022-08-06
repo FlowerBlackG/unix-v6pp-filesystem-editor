@@ -42,6 +42,10 @@ public:
      * 10 目录文件。11 块设备文件。
      */
     uint16_t file_type : 2;
+
+    /**
+     * 是否已被分配。
+     */
     uint16_t ialloc : 1;
 
     uint16_t d_mode_paddings;
@@ -76,6 +80,8 @@ public:
     Inode(std::fstream& f, const int blockOffset) {
         this->loadFromImg(f, blockOffset);
     }
+
+    void loadEmptyProfile();
 
 public:
     /**

@@ -17,10 +17,10 @@
 class SuperBlock {
 public:
     /** 外存 Inode 区占用的盘块数。 */
-    uint32_t s_isize;
+    uint32_t s_isize = MachineProps::INODE_ZONE_BLOCKS;
 
     /** 盘块总数。 */
-    uint32_t s_fsize;
+    uint32_t s_fsize = MachineProps::diskSize();
 
     /** 直接管理的空闲盘块数量。 */
     uint32_t s_nfree;
@@ -124,6 +124,8 @@ public:
         std::fstream& f, 
         const int blockOffset = MachineProps::KERNEL_AND_BOOT_BLOCKS
     );
+
+    void loadDefaultProfile();
 } __packed;
 
 

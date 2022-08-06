@@ -29,3 +29,7 @@ bool Inode::writeToImg(fstream& f, const int blockOffset) {
     return true;
 }
 
+void Inode::loadEmptyProfile() {
+    this->ialloc = 0;
+    this->ilarg = 0;
+}

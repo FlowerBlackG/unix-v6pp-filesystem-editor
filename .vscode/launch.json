@@ -5,7 +5,10 @@
             "type": "cppdbg",
             "request": "launch",
             "program": "${workspaceFolder}\\output\\fsedit.exe",
-            "args": [],
+            "args": [
+                "E:\\code-repo\\unix-v6pp-filesystem-editor\\output\\c.img",
+                "e"
+            ],
             "stopAtEntry": false,
             "cwd": "C:/devkits/TDM-GCC-64/bin",
             "environment": [],

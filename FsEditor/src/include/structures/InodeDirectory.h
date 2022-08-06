@@ -37,7 +37,14 @@ public:
         }
     }
 
-    InodeDirectory(const Inode& inode, class FileSystemAdapter& f, bool ignoreFileTypeCheck = false);
+    InodeDirectory(
+        Inode& inode, 
+        class FileSystemAdapter& f, 
+        bool ignoreFileTypeCheck = false, 
+        int extraEntriesToAlloc = 0
+    );
+
+    InodeDirectory(int nEntries);
 
 public:
     int length = 0;
