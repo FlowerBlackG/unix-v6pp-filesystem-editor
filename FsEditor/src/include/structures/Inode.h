@@ -48,7 +48,7 @@ public:
      */
     uint16_t ialloc : 1;
 
-    uint16_t d_mode_paddings;
+    uint16_t d_mode_paddings = 0;
 
     uint32_t d_nlink;
     uint16_t d_uid;

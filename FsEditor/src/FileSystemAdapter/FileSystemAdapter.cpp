@@ -63,6 +63,13 @@ bool FileSystemAdapter::readBlock(Block& block, const int blockIdx) {
 
 
 bool FileSystemAdapter::readBlocks(char* buffer, const int blockIdx, const int blockCount) {
+    if (blockIdx + blockCount > MachineProps::diskBlocks()) {
+        cout << "[critical 1] FileSystemAdapter::readBlocks c*ii" << endl;
+        cout << "             pBuf: " << (int*) buffer << ", blockIdx: " 
+            << blockIdx << ", count: " << blockCount << endl;
+        exit(-1);
+    }
+
     fileStream.clear();
     fileStream.seekg(blockIdx * sizeof(Block), ios::beg);
     fileStream.read(buffer, blockCount * sizeof(Block));
@@ -75,6 +82,13 @@ bool FileSystemAdapter::writeBlock(const Block& block, const int blockIdx) {
 
 
 bool FileSystemAdapter::writeBlocks(const char* buffer, const int blockIdx, const int blockCount) {
+    if (blockIdx + blockCount > MachineProps::diskBlocks()) {
+        cout << "[critical 1] FileSystemAdapter::writeBlocks c*ii" << endl;
+        cout << "             pBuf: " << (int*) buffer << ", blockIdx: " 
+            << blockIdx << ", count: " << blockCount << endl;
+        exit(-1);
+    }
+
     fileStream.clear();
     fileStream.seekp(blockIdx * sizeof(Block), ios::beg);
     fileStream.write(buffer, blockCount * sizeof(Block));
@@ -133,10 +147,6 @@ bool FileSystemAdapter::iterateOverInodeDataBlocks(
         dataBlockPostProcess(inode.direct_index[idx]);
 
         sizeRemaining -= sizeof(Block);
-        
-        if (sizeRemaining == -256) {
-            int x;
-        }
     }
 
     // 一级索引读入。
@@ -159,7 +169,7 @@ bool FileSystemAdapter::iterateOverInodeDataBlocks(
             int entriesTargetByteOffset = MachineProps::BLOCK_SIZE 
                 * (6 + entriesPerIdxBlock * firIdxBlockIdx + idx);
 
-            uint32_t nextBlkIdx = blockAllocator(inode.indirect_index[firIdxBlockIdx]);
+            uint32_t nextBlkIdx = blockAllocator(firstIdxBlockBuffer[idx]);
             if (nextBlkIdx < 0) {
                 errmsg = "fir indirect index, block allocation failed (direct).";
                 goto IT_INODE_DATA_BLOCKS_FAILED;
@@ -168,7 +178,7 @@ bool FileSystemAdapter::iterateOverInodeDataBlocks(
             firstIdxBlockBuffer[idx] = nextBlkIdx;
 
             blockDiscoveryHandler(entriesTargetByteOffset, firstIdxBlockBuffer[idx]);
-            dataBlockPostProcess( firstIdxBlockBuffer[idx]);
+            dataBlockPostProcess(firstIdxBlockBuffer[idx]);
 
             sizeRemaining -= MachineProps::BLOCK_SIZE;
             
@@ -284,6 +294,12 @@ bool FileSystemAdapter::writeFile(char* buffer, Inode& inode, int filesize) {
         inode, 
         
         [&] (int dataByteOffset, int blockIdx) {
+
+            ////////////////////////////////////////
+            cout << "off: " << dataByteOffset << ", blkid: " << blockIdx << endl;
+            //return;
+
+            //////////////////////////////////////////
             this->writeBlocks(
                 buffer + dataByteOffset, blockIdx, 1
             );
@@ -301,6 +317,9 @@ bool FileSystemAdapter::writeFile(char* buffer, Inode& inode, int filesize) {
         [] (...) {},
 
         [&] (const char* pBlock, int blockIndex) {
+            cout << "blkid: " << blockIndex << endl;
+            //return;
+            //////////////////////////////////////////////////////////////////////////
             this->writeBlocks(
                 pBlock, blockIndex, 1
             );
@@ -388,7 +407,6 @@ bool FileSystemAdapter::uploadFile(const std::string& fname, std::fstream& f) {
         [] (...) {},
 
         [&] (const char* pBlock, int blockIndex) {
-            return;
             this->writeBlocks(
                 pBlock, blockIndex, 1
             );
@@ -447,32 +465,52 @@ void FileSystemAdapter::format() {
     this->superBlock.loadDefaultProfile(); // 重置 superblock。
 
     // 释放 inode。
+
+#if 0
     for (
         int idx = ROOT_INODE_IDX + 1; 
         idx < MachineProps::INODE_ZONE_BLOCKS * sizeof(Block) / sizeof(Inode); 
         idx++
     ) {
+#else
+    for (
+        int idx = MachineProps::INODE_ZONE_BLOCKS * sizeof(Block) / sizeof(Inode) - 1;
+        idx > ROOT_INODE_IDX; 
+        idx--
+    ) {
+#endif
+
         this->freeInode(idx);
     }
 
     // 链接所有 block。
+#if 0 // 两种盘块登记顺序。
     for (
         int idx = superBlock.data_zone_begin;
         idx < superBlock.data_zone_begin + superBlock.data_zone_blocks;
         idx++
     ) {
+#else
+    for (
+        int idx = superBlock.data_zone_begin + superBlock.data_zone_blocks - 1;
+        idx >= superBlock.data_zone_begin;
+        idx--
+    ) {
+#endif
         this->freeBlock(idx);
     }
-
-    char zeroFillBuf[sizeof(Block)];
-    memset(zeroFillBuf, 0, sizeof(Block));
-    this->writeBlocks(zeroFillBuf, superBlock.data_zone_begin, sizeof(Block));
 
     // 创建 root 目录，并写入 dev/tty1。
     
     inodeIdxStack.clear();
     inodeIdxStack.push_back(ROOT_INODE_IDX);
     Inode& rootInode = this->inodes[ROOT_INODE_IDX];
+
+    rootInode.permission_group = 7;
+    rootInode.permission_owner = 7;
+    rootInode.permission_others = 7;
+    rootInode.d_nlink = 1;
+
     rootInode.file_type = Inode::FileType::DIR;
     rootInode.d_size = 0;
     rootInode.d_mtime = getCurrentTimeStamp();
@@ -517,28 +555,79 @@ void FileSystemAdapter::writeBootLoader(fstream& bootLoaderFile) {
 
 /* ------------ 盘块和 inode 获取与释放。 ------------ */
 int FileSystemAdapter::getFreeBlock() {
+    int ret;
+
     if (superBlock.s_nfree == 0) {
-        return -1; // 无空盘块。
+
+        //////////////////////////////////////////
+        cout << "getFreeBlock: -1 no free block" << endl;
+
+        ret = -1; // 无空盘块。
     } else if (superBlock.s_nfree >= 2) {
-        return superBlock.s_free[--superBlock.s_nfree];
+        //////////////////////////////////////////
+        cout << "getFreeBlock: good" << endl;
+        cout << "     s_nfree: " << superBlock.s_nfree << endl;
+        cout << "      result: " << superBlock.s_free[superBlock.s_nfree - 1] << endl;
+
+
+        ret = superBlock.s_free[--superBlock.s_nfree];
     } else {
         int result = superBlock.s_free[0];
         Block b;
         readBlock(b, result);
         memcpy(&superBlock.s_nfree, &b, 101 * sizeof(uint32_t));
-        return result;
+
+///////////////////////////////////////////////
+cout << "getFreeBlock: recollect: " << result << endl;
+
+        ret = result;
     }
+
+    if (ret >= MachineProps::diskBlocks()) {
+        cout << "[critical 2] FSA::getFreeBlock" << endl;
+        cout << "             ret: " << ret << endl;
+        cout << "s_nfree: " << superBlock.s_nfree << endl;
+        for (int i = 0; i < 100; i++) {
+            cout << "[" << i << "] " << superBlock.s_free[i] << endl;
+        }
+        exit(-1);
+    }
+
+    return ret;
 }
 
+
 void FileSystemAdapter::freeBlock(int idx) {
+
+    if (idx >= MachineProps::diskBlocks()) {
+        cout << "[critical 3] FSA::freeBlock" << endl;
+        cout << "             idx: " << idx << endl;
+        cout << "s_nfree: " << superBlock.s_nfree << endl;
+        for (int i = 0; i < 100; i++) {
+            cout << "[" << i << "] " << superBlock.s_free[i] << endl;
+        }
+        exit(-1);
+    }
+
+    cout << endl << "free block: " << idx << endl;///////////////////
+    cout << "  snfree: " << superBlock.s_nfree << endl;/////////////////////////////
+
+    if (superBlock.s_nfree == 0) {
+        superBlock.s_free[0] = 0;
+        superBlock.s_nfree = 1;
+    }
+    
     if (superBlock.s_nfree < 100) {
         superBlock.s_free[superBlock.s_nfree++] = idx;
     } else {
+cout << "100. fresh!" << endl;//////////////////////////////
         Block b;
         memcpy(&b, &superBlock.s_nfree, 101 * sizeof(uint32_t));
         writeBlock(b, idx);
+
         superBlock.s_nfree = 1;
         superBlock.s_free[0] = idx;
+
     }
 }
 
@@ -694,7 +783,11 @@ void FileSystemAdapter::ls(const InodeDirectory& dir) {
 }
 
 void FileSystemAdapter::ls(Inode& inode) {
-    this->ls(InodeDirectory(inode, *this, false));
+    try {
+        this->ls(InodeDirectory(inode, *this, true));
+    } catch (const runtime_error& e) {
+        cout << "[error] FSA::ls Inode& exception: " << e.what() << endl;
+    }
 }
 
 void FileSystemAdapter::ls() {
@@ -758,7 +851,7 @@ bool FileSystemAdapter::cd(const string& folderName) {
         }
     }
 
-    InodeDirectory dir(this->inodes[inodeIdxStack.back()], *this, false);
+    InodeDirectory dir(this->inodes[inodeIdxStack.back()], *this, true);
     
     for (int entryIdx = 0; entryIdx < dir.length; entryIdx++) {
         
@@ -782,9 +875,11 @@ int FileSystemAdapter::mkdir(const string& dirName) {
     int inodeIdx = touch(dirName, Inode::FileType::DIR);
     if (inodeIdx < 0) {
         cout << "[error] 无法创建文件夹。" << endl;
+        return -1;
     } else {
         Inode& inode = this->inodes[inodeIdx];
         inode.d_size = 0;
+        return inodeIdx;
     }
 }
 
@@ -799,7 +894,7 @@ int FileSystemAdapter::removeChildren(Inode& inode) {
     } else {
         int result = 0;
         
-        InodeDirectory dir(inode, *this, false, 1);
+        InodeDirectory dir(inode, *this, true, 1);
         this->freeInodeBlocks(inode);
         for (int entryIdx = 0; entryIdx < dir.length; entryIdx++) {
             cout << "[info] 删除：" << dir.entries[entryIdx].m_name << endl;
@@ -814,7 +909,7 @@ int FileSystemAdapter::removeChildren(Inode& inode) {
  * rm -rf 
  */
 int FileSystemAdapter::rm(const std::string& path) {
-    InodeDirectory dir(this->inodes[inodeIdxStack.back()], *this, false, 1);
+    InodeDirectory dir(this->inodes[inodeIdxStack.back()], *this, true, 1);
     
     int targetIdx = -1;
     int entryIdx;
@@ -875,6 +970,7 @@ int FileSystemAdapter::touch(const std::string& fileName, Inode::FileType type) 
         inode.file_type = type;
 
         dir.entries[dir.length].m_ino = inodeIdx;
+        memset(dir.entries[dir.length].m_name, 0, sizeof(DirectoryEntry::m_name));
         memcpy(
             dir.entries[dir.length].m_name, 
             fileName.c_str(), 

@@ -6,7 +6,7 @@
             "request": "launch",
             "program": "${workspaceFolder}\\output\\fsedit.exe",
             "args": [
-                "${workspaceFolder}\\output\\c-back.img", // 磁盘文件路径。
+                "${workspaceFolder}\\output\\c.img", // 磁盘文件路径。
                 "e"
             ],
             "stopAtEntry": false,

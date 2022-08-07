@@ -11,7 +11,7 @@
 
 class Block {
 public:
-    uint8_t bytes[MachineProps::BLOCK_SIZE];
+    uint8_t bytes[MachineProps::BLOCK_SIZE] = {0};
 
 public:
     inline char* asCharArray() {

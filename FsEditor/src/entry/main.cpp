@@ -216,111 +216,108 @@ static void runInteractiveCli(FileSystemAdapter& fsAdapter) {
 
         int operation = readLatinChar();
 
-        try {
-            if (operation == 'h') { // help
+        if (operation == 'h') { // help
 
-                usage();
+            usage();
 
-            } else if (operation == 'f') { // format
+        } else if (operation == 'f') { // format
 
-                fsAdapter.format();
+            fsAdapter.format();
 
-            } else if (operation == 'l') { // list
+        } else if (operation == 'l') { // list
 
-                fsAdapter.ls();
+            fsAdapter.ls();
 
-            } else if (operation == 'c') { // change dir
+        } else if (operation == 'c') { // change dir
 
-                string path = readPath();
-                
-                if (fsAdapter.cd(path)) {
-                    pathSegments.push_back(path);
-                    cout << "[info] 切换路径。" << endl;
-                } else {
-                    // nothing to do..
-                    cout << "[info] 试图切换路径，但没有任何事发生。" << endl;
-                }
-
-            } else if (operation == 'p') { // put
-
-                string path = readPath();
-                fstream f(path, ios::in | ios::binary);
-                if (!f.is_open()) {
-                    cout << "[error 4] 无法打开：" << path << endl;
-                } else {
-                    string v6ppFileName = readPath();
-                    fsAdapter.uploadFile(v6ppFileName, f);
-                    cout << "[info 5] 上传成功：" << v6ppFileName << endl;
-                }
-
-            } else if (operation == 'g') { // get
-
-                string v6ppPath = readPath();
-                string localPath = readPath();
-                fstream f(localPath, ios::in | ios::binary);
-                if (!f.is_open()) {
-                    cout << "[error 6] 无法打开：" << localPath << endl;
-                } else {
-                    fsAdapter.downloadFile(v6ppPath, f);
-                    cout << "[info 7] 下载成功：" << v6ppPath << endl;
-                }
-
-            } else if (operation == 'r') { // remove
-
-                string path = readPath();
-                int count = fsAdapter.rm(path);
-                cout << "[info 8] 删除文件（夹）数：" << count << endl;
-
-            } else if (operation == 'm') { // make dir
-
-                string path = readPath();
-                fsAdapter.mkdir(path);
-                cout << "[info 9] 创建文件夹：" << path << endl;
-
-            } else if (operation == 'k') { // write kernel
-
-                string path = readPath();
-                fstream f(path, ios::in | ios::binary);
-                if (!f.is_open()) {
-                    cout << "[error 10] 无法打开：" << path << endl;
-                } else {
-                    fsAdapter.writeKernel(f);
-                    f.close();
-                    cout << "[info 11] 内核写入完毕。" << endl;
-                }
+            string path = readPath();
             
-            } else if (operation == 'b') { // write bootloader
-            
-                string path = readPath();
-                fstream f(path, ios::in | ios::binary);
-                if (!f.is_open()) {
-                    cout << "[error 12] 无法打开：" << path << endl;
-                } else {
-                    fsAdapter.writeBootLoader(f);
-                    f.close();
-                    cout << "[info 13] 启动引导程序写入完毕。" << endl;
-                }
-            
-            } else if (operation == 'x') { // exit
-            
-                fsAdapter.sync();
-                cout << "bye!" << endl;
-                break; // 结束。
-            
+            if (fsAdapter.cd(path)) {
+                pathSegments.push_back(path);
+                cout << "[info] 切换路径。" << endl;
             } else {
-            
-                string msg = "未知选项：";
-                msg += char(operation);
-                msg += " (";
-                msg += to_string(operation);
-                msg += ")"; 
-                usage(msg.c_str());
-            
+                // nothing to do..
+                cout << "[info] 试图切换路径，但没有任何事发生。" << endl;
             }
-            // 注：你知道为什么要用一堆 if else，而不是一个 switch 么...
-        } catch (const runtime_error& e) {
-            cout << "异常捕获：" << e.what() << endl;
+
+        } else if (operation == 'p') { // put
+
+            string path = readPath();
+            fstream f(path, ios::in | ios::binary);
+            if (!f.is_open()) {
+                cout << "[error 4] 无法打开：" << path << endl;
+            } else {
+                string v6ppFileName = readPath();
+                fsAdapter.uploadFile(v6ppFileName, f);
+                cout << "[info 5] 上传成功：" << v6ppFileName << endl;
+            }
+
+        } else if (operation == 'g') { // get
+
+            string v6ppPath = readPath();
+            string localPath = readPath();
+            fstream f(localPath, ios::out | ios::binary);
+            if (!f.is_open()) {
+                cout << "[error 6] 无法打开：" << localPath << endl;
+            } else {
+                fsAdapter.downloadFile(v6ppPath, f);
+                cout << "[info 7] 下载成功：" << v6ppPath << " -> " << localPath << endl;
+            }
+
+        } else if (operation == 'r') { // remove
+
+            string path = readPath();
+            int count = fsAdapter.rm(path);
+            cout << "[info 8] 删除文件（夹）数：" << count << endl;
+
+        } else if (operation == 'm') { // make dir
+
+            string path = readPath();
+            fsAdapter.mkdir(path);
+            cout << "[info 9] 创建文件夹：" << path << endl;
+
+        } else if (operation == 'k') { // write kernel
+
+            string path = readPath();
+            fstream f(path, ios::in | ios::binary);
+            if (!f.is_open()) {
+                cout << "[error 10] 无法打开：" << path << endl;
+            } else {
+                fsAdapter.writeKernel(f);
+                f.close();
+                cout << "[info 11] 内核写入完毕。" << endl;
+            }
+        
+        } else if (operation == 'b') { // write bootloader
+        
+            string path = readPath();
+            fstream f(path, ios::in | ios::binary);
+            if (!f.is_open()) {
+                cout << "[error 12] 无法打开：" << path << endl;
+            } else {
+                fsAdapter.writeBootLoader(f);
+                f.close();
+                cout << "[info 13] 启动引导程序写入完毕。" << endl;
+            }
+        
+        } else if (operation == 'x') { // exit
+        
+            fsAdapter.sync();
+            cout << "bye!" << endl;
+            break; // 结束。
+        
+        } else {
+        
+            string msg = "未知选项：";
+            msg += char(operation);
+            msg += " (";
+            msg += to_string(operation);
+            msg += ")"; 
+            usage(msg.c_str());
+        
         }
+        // 注：你知道为什么要用一堆 if else，而不是一个 switch 么...
+
     }
 }
 
