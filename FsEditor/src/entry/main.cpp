@@ -1,7 +1,27 @@
+/* source files' encoding: utf-8 */
+
 /*
  * 文件系统读写器 - 进入点。
  * 2051565 龚天遥
  * 创建于 2022年7月29日。
+ * 
+ * 参考构建环境：
+ *   Windows 11 x64
+ *   gcc 10.3.0 (tdm64-1)
+ *   语言版本：C++17
+ * 
+ * 参考运行环境：
+ *   LC_ALL: en_US.GB18030
+ *   code page: 936
+ *   shell: powershell 7.2.5
+ *   terminal: Windows Terminal
+ * 
+ * 感谢：
+ *   邓蓉老师
+ *   方钰老师
+ *   沈坚老师
+ * 
+ * 2022年8月7日：基本完工，并完成在内核上的测试。
  */
 
 #include <iostream>
@@ -109,6 +129,16 @@ static char readLatinChar() {
     exit(-1);
 }
 
+
+/**
+ * 读取一个路径参数。
+ * 输入者需要将该路径以 || 包裹。
+ * 如：|tongji/dr.exe|。
+ * 实际返回时，不包含双竖线。
+ * 同时，读取过程会过滤路径前后的空字符和引号。
+ * 
+ * @return string 
+ */
 static string readPath() {
     string res;
     int ch;
@@ -154,7 +184,6 @@ static string readPath() {
     cout << "        main::readPath" << endl;
     exit(-1);
 }
-
 
 static void readPath(vector<string>& pathSegments) {
     string pathStr = readPath();
@@ -214,7 +243,10 @@ static void runInteractiveCli(FileSystemAdapter& fsAdapter) {
 
         cout << "] > ";
 
+        // 读取输入内容。
         int operation = readLatinChar();
+
+        // 处理用户命令。
 
         if (operation == 'h') { // help
 
@@ -348,8 +380,8 @@ int main(int argc, const char* argv[]) {
 
     if (prepareImgFile(imgPath, option, imgSize) == 0) {
         FileSystemAdapter fsAdapter(imgPath);
-        fsAdapter.load();
-        runInteractiveCli(fsAdapter);
+        fsAdapter.load(); // 从磁盘文件载入文件系统（的 superblock 和 inodes）。
+        runInteractiveCli(fsAdapter); // 进入交互式命令行。
         return 0;
     } else {
         return -1;

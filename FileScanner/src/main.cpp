@@ -1,3 +1,5 @@
+/* source files' encoding: utf-8 */
+
 /*
  * Unix V6++ 文件系统构建工具 - 控制器。
  * 负责扫描本地文件并控制格式化工具工作。

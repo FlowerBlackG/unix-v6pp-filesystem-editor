@@ -1,5 +1,5 @@
 /*
- * 文件系统适配器。
+ * 文件系统适配器 - 实现。
  * 2051565 龚天遥
  * 创建于 2022年7月29日。
  */
@@ -23,6 +23,11 @@
 using namespace std;
 using namespace std::chrono;
 
+/**
+ * 获取当前系统时间戳。单位：秒。
+ * 
+ * @return int 时间戳。单位：秒。
+ */
 static int getCurrentTimeStamp() {
     auto now = system_clock::now();
     nanoseconds nanosec = now.time_since_epoch();
@@ -294,12 +299,6 @@ bool FileSystemAdapter::writeFile(char* buffer, Inode& inode, int filesize) {
         inode, 
         
         [&] (int dataByteOffset, int blockIdx) {
-
-            ////////////////////////////////////////
-            cout << "off: " << dataByteOffset << ", blkid: " << blockIdx << endl;
-            //return;
-
-            //////////////////////////////////////////
             this->writeBlocks(
                 buffer + dataByteOffset, blockIdx, 1
             );
@@ -317,9 +316,6 @@ bool FileSystemAdapter::writeFile(char* buffer, Inode& inode, int filesize) {
         [] (...) {},
 
         [&] (const char* pBlock, int blockIndex) {
-            cout << "blkid: " << blockIndex << endl;
-            //return;
-            //////////////////////////////////////////////////////////////////////////
             this->writeBlocks(
                 pBlock, blockIndex, 1
             );
@@ -466,7 +462,7 @@ void FileSystemAdapter::format() {
 
     // 释放 inode。
 
-#if 0
+#if 0 // 两种 inode 登记顺序。
     for (
         int idx = ROOT_INODE_IDX + 1; 
         idx < MachineProps::INODE_ZONE_BLOCKS * sizeof(Block) / sizeof(Inode); 
@@ -559,16 +555,8 @@ int FileSystemAdapter::getFreeBlock() {
 
     if (superBlock.s_nfree == 0) {
 
-        //////////////////////////////////////////
-        cout << "getFreeBlock: -1 no free block" << endl;
-
         ret = -1; // 无空盘块。
     } else if (superBlock.s_nfree >= 2) {
-        //////////////////////////////////////////
-        cout << "getFreeBlock: good" << endl;
-        cout << "     s_nfree: " << superBlock.s_nfree << endl;
-        cout << "      result: " << superBlock.s_free[superBlock.s_nfree - 1] << endl;
-
 
         ret = superBlock.s_free[--superBlock.s_nfree];
     } else {
@@ -576,9 +564,6 @@ int FileSystemAdapter::getFreeBlock() {
         Block b;
         readBlock(b, result);
         memcpy(&superBlock.s_nfree, &b, 101 * sizeof(uint32_t));
-
-///////////////////////////////////////////////
-cout << "getFreeBlock: recollect: " << result << endl;
 
         ret = result;
     }
@@ -609,9 +594,6 @@ void FileSystemAdapter::freeBlock(int idx) {
         exit(-1);
     }
 
-    cout << endl << "free block: " << idx << endl;///////////////////
-    cout << "  snfree: " << superBlock.s_nfree << endl;/////////////////////////////
-
     if (superBlock.s_nfree == 0) {
         superBlock.s_free[0] = 0;
         superBlock.s_nfree = 1;
@@ -620,7 +602,7 @@ void FileSystemAdapter::freeBlock(int idx) {
     if (superBlock.s_nfree < 100) {
         superBlock.s_free[superBlock.s_nfree++] = idx;
     } else {
-cout << "100. fresh!" << endl;//////////////////////////////
+
         Block b;
         memcpy(&b, &superBlock.s_nfree, 101 * sizeof(uint32_t));
         writeBlock(b, idx);
