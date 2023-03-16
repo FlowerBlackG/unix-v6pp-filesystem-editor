@@ -521,7 +521,8 @@ void FileSystemAdapter::format() {
     inodeIdxStack.pop_back(); // 回到 root。
     
     // 小彩蛋。当时debug用的，不想删了。
-    this->touch("tongji-yyds", Inode::FileType::NORMAL); 
+    //   后续：按照老师要求，还是删掉了qwq.
+    //this->touch("tongji-yyds", Inode::FileType::NORMAL); 
 }
 
 void FileSystemAdapter::writeKernel(fstream& kernelFile) {
