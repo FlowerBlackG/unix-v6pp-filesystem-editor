@@ -7,8 +7,8 @@ prepare:
 	mkdir -p target
 	mkdir -p build/FsEditor
 	mkdir -p build/FileScanner
-	cd build/FsEditor && cmake -G"Unix Makefiles" ../../FsEditor
-	cd build/FileScanner && cmake -G"Unix Makefiles" ../../FileScanner
+	cd build/FsEditor && cmake -G"Ninja" ../../FsEditor
+	cd build/FileScanner && cmake -G"Ninja" ../../FileScanner
 
 
 .PHONY: build
